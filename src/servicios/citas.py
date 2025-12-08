@@ -28,9 +28,17 @@ def lista_citas():
         # Llamar al stored procedure
         cursor.callproc('sp_obtener_todas_citas')
         datos = cursor.fetchall()
+        
+        if not datos:
+            return jsonify({
+                'datos': [],
+                'mensaje': "No hay citas registradas",
+                'exito': False
+            }), 404
+
+        # Obtener nombres de columnas ANTES de nextset()
+        columnas = [desc[0] for desc in cursor.description]
         cursor.nextset()
-       
-        columnas = [desc[0] for desc in cursor.description] if cursor.description else []
         
         arr_citas = []
         for fila in datos:
@@ -58,18 +66,19 @@ def lista_citas():
 def obtener_cita(id_cita):
     try:
         cursor = conexion.connection.cursor()
-        # Llamar al stored procedure
         cursor.callproc('sp_obtener_cita_por_id', (id_cita,))
         fila = cursor.fetchone()
-        cursor.nextset()
         
         if fila is None:
+            cursor.nextset()
             return jsonify({
                 'mensaje': "Cita no encontrada",
                 'exito': False
             }), 404
 
-        columnas = [desc[0] for desc in cursor.description] if cursor.description else []
+        columnas = [desc[0] for desc in cursor.description]
+        cursor.nextset()
+        
         cita_dict = {}
         for col, val in zip(columnas, fila):
             if isinstance(val, (datetime, date, time, timedelta)):
@@ -94,18 +103,20 @@ def obtener_cita(id_cita):
 def buscar_citas_doctor(nombre_doctor):
     try:
         cursor = conexion.connection.cursor()
-        # Llamar al stored procedure
         cursor.callproc('sp_buscar_citas_doctor', (nombre_doctor,))
         datos = cursor.fetchall()
-        cursor.nextset()
         
         if not datos:
+            cursor.nextset()
             return jsonify({
-                'mensaje': f"No hay citas para el doctor: {nombre_doctor}",
+                'datos': [],
+                'mensaje': f"El doctor '{nombre_doctor}' no tiene citas registradas",
                 'exito': False
             }), 404
 
-        columnas = [desc[0] for desc in cursor.description] if cursor.description else []
+        columnas = [desc[0] for desc in cursor.description]
+        cursor.nextset()
+        
         arr_citas = []
         for fila in datos:
             fila_dict = {}
@@ -133,18 +144,20 @@ def buscar_citas_doctor(nombre_doctor):
 def buscar_citas_paciente(nombre_paciente):
     try:
         cursor = conexion.connection.cursor()
-        # Llamar al stored procedure
         cursor.callproc('sp_buscar_citas_paciente', (nombre_paciente,))
         datos = cursor.fetchall()
-        cursor.nextset()
         
         if not datos:
+            cursor.nextset()
             return jsonify({
-                'mensaje': f"No hay citas para el paciente: {nombre_paciente}",
+                'datos': [],
+                'mensaje': f"El paciente '{nombre_paciente}' no tiene citas registradas",
                 'exito': False
             }), 404
 
-        columnas = [desc[0] for desc in cursor.description] if cursor.description else []
+        columnas = [desc[0] for desc in cursor.description]
+        cursor.nextset()
+        
         arr_citas = []
         for fila in datos:
             fila_dict = {}
@@ -174,6 +187,7 @@ def agregar_cita():
                            'fecha', 'hora', 'estado', 
                            'motivo', 'precio_costo']
         
+
         for campo in campos_requeridos:
             if campo not in request.json:
                 return jsonify({
@@ -250,18 +264,20 @@ def agregar_cita():
 def buscar_citas_fecha(fecha):
     try:
         cursor = conexion.connection.cursor()
-        # Llamar al stored procedure
         cursor.callproc('sp_buscar_citas_fecha', (fecha,))
         datos = cursor.fetchall()
-        cursor.nextset()
 
         if not datos:
+            cursor.nextset()
             return jsonify({
-                'mensaje': f"No hay citas para la fecha: {fecha}",
+                'datos': [],
+                'mensaje': f"No hay citas para la fecha {fecha}",
                 'exito': False
             }), 404
         
-        columnas = [desc[0] for desc in cursor.description] if cursor.description else []
+        columnas = [desc[0] for desc in cursor.description]
+        cursor.nextset()
+        
         arr_citas = []
         for fila in datos:
             fila_dict = {}
@@ -335,18 +351,20 @@ def actualizar_cita(id_cita):
 def buscar_citas_especialidad(nombre_especialidad):
     try:
         cursor = conexion.connection.cursor()
-        # Llamar al stored procedure
         cursor.callproc('sp_buscar_citas_especialidad', (nombre_especialidad,))
         datos = cursor.fetchall()
-        cursor.nextset()
         
         if not datos:
+            cursor.nextset()
             return jsonify({
-                'mensaje': f"No hay citas para la especialidad: {nombre_especialidad}",
+                'datos': [],
+                'mensaje': f"No hay citas para la especialidad '{nombre_especialidad}'",
                 'exito': False
             }), 404
 
-        columnas = [desc[0] for desc in cursor.description] if cursor.description else []
+        columnas = [desc[0] for desc in cursor.description]
+        cursor.nextset()
+        
         arr_citas = []
         for fila in datos:
             fila_dict = {}
@@ -395,3 +413,4 @@ def eliminar_cita(id_cita):
             'mensaje': f"Error al eliminar cita: {str(ex)}",
             'exito': False
         }), 500
+    

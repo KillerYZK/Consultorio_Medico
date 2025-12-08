@@ -17,6 +17,13 @@ def lista_pacientes():
         cursor.execute(sql)
         datos = cursor.fetchall()
         
+        if not datos:
+            return jsonify({
+                'datos': [],
+                'mensaje': "No hay pacientes registrados",
+                'exito': False
+            }), 404
+        
         columnas = [desc[0] for desc in cursor.description]
         arr_pacientes = [dict(zip(columnas, fila)) for fila in datos]
 
@@ -27,7 +34,7 @@ def lista_pacientes():
         }), 200
     except Exception as ex:
         return jsonify({
-            'mensaje': f"Error al obtener pacientes: {str(ex)}",
+            'mensaje': f"Error: {str(ex)}",
             'exito': False
         }), 500
 
@@ -36,67 +43,128 @@ def lista_pacientes():
 def buscar_pacientes(nombre):
     try:
         cursor = conexion.connection.cursor()
-        # Usar parámetros para prevenir SQL Injection
-        sql = "SELECT * FROM pacientes WHERE nombre = %s"
-        cursor.execute(sql, (nombre,))
-        datos = cursor.fetchone()
+        sql = "SELECT * FROM pacientes WHERE nombre LIKE %s"
+        cursor.execute(sql, (f"%{nombre}%",))
+        datos = cursor.fetchall()
        
-        if datos:
-            # Usar zip para crear el diccionario automáticamente
-            columnas = [desc[0] for desc in cursor.description]
-            paciente = dict(zip(columnas, datos))
-
+        if not datos:
             return jsonify({
-                'datos': paciente,
-                'mensaje': "Paciente encontrado",
-                'exito': True
-            }), 200
-        
+                'datos': [],
+                'mensaje': f"No se encontraron pacientes con el nombre: {nombre}",
+                'exito': False
+            }), 404
+
+        columnas = [desc[0] for desc in cursor.description]
+        arr_pacientes = [dict(zip(columnas, fila)) for fila in datos]
+
         return jsonify({
-            'mensaje': 'Paciente no encontrado',
-            'exito': False
-        }), 404
+            'datos': arr_pacientes,
+            'mensaje': "Pacientes encontrados",
+            'exito': True
+        }), 200
         
     except Exception as ex:
         return jsonify({
-            'mensaje': f"Error al buscar paciente: {str(ex)}",
+            'mensaje': f"Error: {str(ex)}",
             'exito': False
         }), 500
 
 @pacientes_bp.route("/pacientes", methods=["POST"])
 @jwt_required()
-def agregar_paciente():
+def crear_paciente():
     try:
-        campos_requeridos = ['nombre', 'apellido', 'fecha_nacimiento',
-                           'sexo', 'telefono', 'correo',
-                           'direccion', 'historial_medico', 'fecha_registro']
+        datos = request.json
         
+        campos_requeridos = ['nombre', 'apellido', 'fecha_nacimiento', 
+                           'sexo', 'telefono', 'correo', 'direccion']
         for campo in campos_requeridos:
-            if campo not in request.json:
+            if campo not in datos:
                 return jsonify({
                     'mensaje': f"El campo {campo} es requerido",
                     'exito': False
                 }), 400
 
         cursor = conexion.connection.cursor()
-        # Quitar comillas de los nombres de columnas
         sql = """INSERT INTO pacientes (nombre, apellido, fecha_nacimiento,
-                             sexo, telefono, correo,
-                             direccion, historial_medico, fecha_registro)
-                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                             sexo, telefono, correo, direccion, 
+                             historial_medico, fecha_registro)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())"""
         
-        datos = tuple(request.json[campo] for campo in campos_requeridos)
-        cursor.execute(sql, datos)
+        cursor.execute(sql, (
+            datos['nombre'],
+            datos['apellido'],
+            datos['fecha_nacimiento'],
+            datos['sexo'],
+            datos['telefono'],
+            datos['correo'],
+            datos['direccion'],
+            datos.get('historial_medico', '')
+        ))
+        
         conexion.connection.commit()
+        cursor.execute("SELECT LAST_INSERT_ID()")
+        id_paciente = cursor.fetchone()[0]
 
         return jsonify({
+            'datos': {
+                'id_paciente': id_paciente,
+                'nombre': datos['nombre'],
+                'apellido': datos['apellido']
+            },
             'mensaje': "Paciente agregado exitosamente",
             'exito': True
         }), 201
     except Exception as ex:
         conexion.connection.rollback()
         return jsonify({
-            'mensaje': f"Error al agregar paciente: {str(ex)}",
+            'mensaje': f"Error: {str(ex)}",
+            'exito': False
+        }), 500
+
+@pacientes_bp.route("/pacientes/<int:id_paciente>", methods=["PUT"])
+@jwt_required()
+def actualizar_paciente(id_paciente):
+    try:
+        cursor = conexion.connection.cursor()
+        
+        cursor.execute("SELECT id_paciente FROM pacientes WHERE id_paciente = %s", (id_paciente,))
+        if not cursor.fetchone():
+            return jsonify({
+                'mensaje': "Paciente no encontrado",
+                'exito': False
+            }), 404
+
+        datos = request.json
+        campos_permitidos = ['nombre', 'apellido', 'fecha_nacimiento',
+                           'sexo', 'telefono', 'correo', 'direccion', 'historial_medico']
+        
+        updates = []
+        valores = []
+        for campo in campos_permitidos:
+            if campo in datos:
+                updates.append(f"{campo} = %s")
+                valores.append(datos[campo])
+        
+        if not updates:
+            return jsonify({
+                'mensaje': "No hay campos para actualizar",
+                'exito': False
+            }), 400
+
+        valores.append(id_paciente)
+        sql = f"UPDATE pacientes SET {', '.join(updates)} WHERE id_paciente = %s"
+        
+        cursor.execute(sql, tuple(valores))
+        conexion.connection.commit()
+
+        return jsonify({
+            'mensaje': "Paciente actualizado exitosamente",
+            'exito': True
+        }), 200
+    except Exception as ex:
+        conexion.connection.rollback()
+        return jsonify({
+            'mensaje': f"Error: {str(ex)}",
             'exito': False
         }), 500
 
@@ -106,74 +174,22 @@ def eliminar_paciente(id_paciente):
     try:
         cursor = conexion.connection.cursor()
         
-        # Verificar si el paciente existe
-        sql_verify = "SELECT id_paciente FROM pacientes WHERE id_paciente = %s"
-        cursor.execute(sql_verify, (id_paciente,))
-        
-        if not cursor.fetchone():
-            return jsonify({
-                'mensaje': f"No existe un paciente con el ID {id_paciente}",
-                'exito': False
-            }), 404
-
-        sql = "DELETE FROM pacientes WHERE id_paciente = %s"
-        cursor.execute(sql, (id_paciente,))
+        # Llamar al stored procedure que borra en cascada
+        cursor.callproc('sp_eliminar_paciente', (id_paciente,))
+        resultado = cursor.fetchone()
+        cursor.nextset()
         conexion.connection.commit()
         
-        return jsonify({
-            'mensaje': f"Paciente con ID {id_paciente} eliminado exitosamente",
-            'exito': True
-        }), 200
+        if resultado:
+            mensaje, exito = resultado
+            return jsonify({
+                'mensaje': mensaje,
+                'exito': exito
+            }), 200 if exito else 500
+        
     except Exception as ex:
         conexion.connection.rollback()
         return jsonify({
-            'mensaje': f"Error al eliminar paciente: {str(ex)}",
-            'exito': False
-        }), 500
-
-@pacientes_bp.route("/pacientes/<int:id_paciente>", methods=["PUT"])
-@jwt_required()
-def actualizar_paciente(id_paciente):
-    try:
-        campos_permitidos = ['nombre', 'apellido', 'fecha_nacimiento',
-                           'sexo', 'telefono', 'correo',
-                           'direccion', 'historial_medico']
-        
-        # Construir la parte SET de la consulta SQL dinámicamente
-        set_clauses = []
-        valores = []
-        for campo in campos_permitidos:
-            if campo in request.json:
-                set_clauses.append(f"{campo} = %s")
-                valores.append(request.json[campo])
-        
-        if not set_clauses:
-            return jsonify({
-                'mensaje': "No se proporcionaron campos para actualizar",
-                'exito': False
-            }), 400
-
-        sql_set = ", ".join(set_clauses)
-        sql = f"UPDATE pacientes SET {sql_set} WHERE id_paciente = %s"
-        valores.append(id_paciente)
-
-        cursor = conexion.connection.cursor()
-        cursor.execute(sql, tuple(valores))
-        conexion.connection.commit()
-
-        if cursor.rowcount == 0:
-            return jsonify({
-                'mensaje': f"No existe un paciente con el ID {id_paciente}",
-                'exito': False
-            }), 404
-
-        return jsonify({
-            'mensaje': f"Paciente actualizado exitosamente",
-            'exito': True
-        }), 200
-    except Exception as ex:
-        conexion.connection.rollback()
-        return jsonify({
-            'mensaje': f"Error al actualizar paciente: {str(ex)}",
+            'mensaje': f"Error: {str(ex)}",
             'exito': False
         }), 500
